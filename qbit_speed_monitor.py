@@ -1,16 +1,12 @@
 import time
 import getpass
-from collections import deque
 from urllib.error import HTTPError, URLError
 
-from api import api_post, get_torrents
+from api import get_torrents
+from monitor import TorrentMonitor
 
 
 CHECK_INTERVAL = 30
-LOW_SPEED_THRESHOLD = 2 * 1024 * 1024
-LOW_SPEED_DURATION = 5 * 60
-REANNOUNCE_COOLDOWN = 15 * 60
-
 
 
 def format_speed(speed):
@@ -23,8 +19,6 @@ def format_speed(speed):
         speed /= 1024
 
     return f"{speed:.1f} TiB/s"
-
-
 
 
 def choose_torrent(torrents):
@@ -80,20 +74,14 @@ def main():
         input("\nPress Enter to exit...")
         return
 
+    monitor = TorrentMonitor(torrent_hash, api_key)
+
     print("\nMonitoring started.")
     print("Press Ctrl+C to stop.\n")
 
-    speed_history = deque()
-    last_reannounce = 0
-
     while True:
         try:
-            torrents = get_torrents(api_key)
-
-            torrent = next(
-                (t for t in torrents if t["hash"] == torrent_hash),
-                None
-            )
+            torrent = monitor.get_torrent()
 
             if torrent is None:
                 print("\nTorrent is no longer downloading.")
@@ -103,17 +91,8 @@ def main():
             now = time.time()
             speed = torrent["dlspeed"]
 
-            speed_history.append((now, speed))
-
-            # Keep only the last 5 minutes.
-            while speed_history and now - speed_history[0][0] > LOW_SPEED_DURATION:
-                speed_history.popleft()
-
-            # Calculate average speed over the available window.
-            average_speed = (
-                sum(s for _, s in speed_history) / len(speed_history)
-                if speed_history else 0
-            )
+            monitor.record_speed(speed, now)
+            average_speed = monitor.get_average_speed()
 
             print(
                 f"[{time.strftime('%H:%M:%S')}] "
@@ -123,29 +102,14 @@ def main():
                 f"Peers: {torrent['num_leechs']}/{torrent['num_incomplete']}"
             )
 
-            # Only trigger once we have a full 5-minute window.
-            if (
-                len(speed_history) >= 5
-                and now - speed_history[0][0] >= LOW_SPEED_DURATION
-                and average_speed < LOW_SPEED_THRESHOLD
-                and now - last_reannounce >= REANNOUNCE_COOLDOWN
-            ):
+            if monitor.should_reannounce(now):
                 print("\n>>> Speed has been below 2 MiB/s for 5 minutes.")
                 print(">>> Forcing tracker reannounce...")
 
-                api_post(
-                    "torrents/reannounce",
-                    {"hashes": torrent_hash},
-                    api_key
-                )
-
-                last_reannounce = now
+                monitor.reannounce()
 
                 print(">>> Reannounce sent.")
                 print(">>> New peers will be allowed to connect normally.\n")
-
-                # Clear history so we don't immediately trigger again.
-                speed_history.clear()
 
             time.sleep(CHECK_INTERVAL)
 
