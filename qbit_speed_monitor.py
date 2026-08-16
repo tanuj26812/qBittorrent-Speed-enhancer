@@ -1,56 +1,16 @@
-import json
 import time
 import getpass
 from collections import deque
-from urllib.request import Request, urlopen
-from urllib.parse import urlencode
 from urllib.error import HTTPError, URLError
 
-BASE_URL = "http://127.0.0.1:8080/api/v2"
-
-CHECK_INTERVAL = 30          # seconds
-LOW_SPEED_THRESHOLD = 2 * 1024 * 1024  # 2 MiB/s
-LOW_SPEED_DURATION = 5 * 60  # 5 minutes
-REANNOUNCE_COOLDOWN = 15 * 60  # 15 minutes
+from api import api_post, get_torrents
 
 
-def api_get(endpoint, params=None, api_key=""):
-    url = f"{BASE_URL}/{endpoint}"
+CHECK_INTERVAL = 30
+LOW_SPEED_THRESHOLD = 2 * 1024 * 1024
+LOW_SPEED_DURATION = 5 * 60
+REANNOUNCE_COOLDOWN = 15 * 60
 
-    if params:
-        url += "?" + urlencode(params)
-
-    request = Request(
-        url,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "User-Agent": "qBittorrent Speed Monitor"
-        }
-    )
-
-    with urlopen(request, timeout=10) as response:
-        return json.loads(response.read().decode("utf-8"))
-
-
-def api_post(endpoint, params=None, api_key=""):
-    url = f"{BASE_URL}/{endpoint}"
-
-    data = None
-    if params:
-        data = urlencode(params).encode("utf-8")
-
-    request = Request(
-        url,
-        data=data,
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "User-Agent": "qBittorrent Speed Monitor"
-        }
-    )
-
-    with urlopen(request, timeout=10) as response:
-        return response.read().decode("utf-8")
 
 
 def format_speed(speed):
@@ -65,12 +25,6 @@ def format_speed(speed):
     return f"{speed:.1f} TiB/s"
 
 
-def get_torrents(api_key):
-    return api_get(
-        "torrents/info",
-        {"filter": "downloading"},
-        api_key
-    )
 
 
 def choose_torrent(torrents):
